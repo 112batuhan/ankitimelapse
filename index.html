@@ -398,6 +398,21 @@ kbd { background: var(--surface-2); border: 1px solid var(--border); border-bott
     requestDraw();
   }
 
+  // Keep the canvas on whole screen pixels so the browser shows it 1:1 instead of
+  // resampling (blurring) it. Done with relative positioning, which is laid out and
+  // pixel-snapped like normal content; Chrome resamples a canvas moved by a
+  // fractional transform. Rechecked when content above the grid or scrolling may
+  // have moved it by a fraction of a pixel.
+  function snapCanvas() {
+    if (!D) return;
+    const wrap = $("gridWrap"), r = canvas.getBoundingClientRect();
+    const off = (v) => { const d = v * dpr; return (d - Math.round(d)) / dpr; };
+    const dx = off(r.left), dy = off(r.top);
+    if (Math.abs(dx * dpr) < 0.01 && Math.abs(dy * dpr) < 0.01) return;
+    wrap.style.left = (parseFloat(wrap.style.left) || 0) - dx + "px";
+    wrap.style.top = (parseFloat(wrap.style.top) || 0) - dy + "px";
+  }
+
   // w, h: grid size in device pixels; the canvas adds a gap-wide margin for edge rings
   function sizeCanvas(w, h) {
     const W = w + 2 * gp, H = h + 2 * gp;
@@ -406,11 +421,8 @@ kbd { background: var(--surface-2); border: 1px solid var(--border); border-bott
     canvas.style.width = W / dpr + "px"; canvas.style.height = H / dpr + "px";
     const wrap = $("gridWrap");
     wrap.style.width = W / dpr + "px";
-    // nudge the canvas onto whole device pixels so the browser doesn't resample (blur) it
-    wrap.style.transform = "";
-    const r = canvas.getBoundingClientRect();
-    const fx = ((r.left + scrollX) * dpr) % 1, fy = ((r.top + scrollY) * dpr) % 1;
-    if (fx || fy) wrap.style.transform = `translate(${-fx / dpr}px, ${-fy / dpr}px)`;
+    wrap.style.left = wrap.style.top = "";
+    snapCanvas();
     ctx.setTransform(1, 0, 0, 1, gp, gp);
     ctx.font = `${FONT_WEIGHT} ${Math.round(ts * FONT_SCALE)}px ${FONT}`;
     // center on a real kanji's ink box rather than the font's em box (Japanese fonts
@@ -577,6 +589,7 @@ kbd { background: var(--surface-2); border: 1px solid var(--border); border-bott
     $("sDay").innerHTML = `${day + 1} <small>/ ${D}</small>`;
     $("slider").value = day;
     $("cursor").setAttribute("x1", day); $("cursor").setAttribute("x2", day);
+    snapCanvas(); // the stats above can rewrap to a different height
     if (pointer) updateHover();
   }
 
@@ -693,7 +706,8 @@ kbd { background: var(--surface-2); border: 1px solid var(--border); border-bott
   }
   canvas.addEventListener("pointermove", (e) => { pointer = { clientX: e.clientX, clientY: e.clientY }; updateHover(); });
   canvas.addEventListener("pointerleave", () => { pointer = null; updateHover(); });
-  addEventListener("scroll", () => { if (pointer) updateHover(); }, { passive: true });
+  addEventListener("scroll", () => { snapCanvas(); if (pointer) updateHover(); }, { passive: true });
+  document.fonts.ready.then(snapCanvas);
 
   // ---------- playback ----------
   function advance(now) {
