@@ -1,0 +1,682 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Kanji Grid Timelapse</title>
+<style>
+:root {
+  --bg: #f6f5f2;
+  --surface: #ffffff;
+  --surface-2: #eeece7;
+  --border: #dcd9d2;
+  --text: #1d1d1f;
+  --muted: #6b6a66;
+  --accent: #2f6fdf;
+  --accent-soft: rgba(47, 111, 223, 0.14);
+  --unseen-bg: #ffffff;
+  --unseen-text: #9a9893;
+  --tile-text: #111;
+  --pulse: #1d1d1f;
+  --bar: #c9c6be;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #131417;
+    --surface: #1c1d21;
+    --surface-2: #26282d;
+    --border: #33363c;
+    --text: #ececec;
+    --muted: #9a9ca3;
+    --accent: #6ea2ff;
+    --accent-soft: rgba(110, 162, 255, 0.16);
+    --unseen-bg: #2b2d33;
+    --unseen-text: #6f727a;
+    --tile-text: #111;
+    --pulse: #ffffff;
+    --bar: #3d4047;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #131417;
+  --surface: #1c1d21;
+  --surface-2: #26282d;
+  --border: #33363c;
+  --text: #ececec;
+  --muted: #9a9ca3;
+  --accent: #6ea2ff;
+  --accent-soft: rgba(110, 162, 255, 0.16);
+  --unseen-bg: #2b2d33;
+  --unseen-text: #6f727a;
+  --tile-text: #111;
+  --pulse: #ffffff;
+  --bar: #3d4047;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+button, input, select { font: inherit; color: inherit; }
+
+.wrap { max-width: 1400px; margin: 0 auto; padding: 20px 16px 40px; }
+
+/* ---------- header ---------- */
+.top {
+  display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between;
+  gap: 12px 24px; margin-bottom: 16px;
+}
+.title { margin: 0; font-size: 13px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.date { font-size: 34px; font-weight: 650; letter-spacing: -.01em; font-variant-numeric: tabular-nums; line-height: 1.1; }
+.stats { display: flex; flex-wrap: wrap; gap: 8px; }
+.stat {
+  background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+  padding: 8px 14px; min-width: 110px;
+}
+.stat .label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+.stat .value { font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.stat .value small { font-size: 13px; color: var(--muted); font-weight: 500; }
+
+/* ---------- panel: controls + chart ---------- */
+.panel {
+  background: var(--surface); border: 1px solid var(--border); border-radius: 14px;
+  padding: 14px 16px; margin-bottom: 16px;
+}
+.controls { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; }
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  height: 34px; min-width: 34px; padding: 0 10px;
+  background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; cursor: pointer;
+}
+.btn:hover { border-color: var(--muted); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; min-width: 84px; font-weight: 600; }
+.btn svg { width: 16px; height: 16px; fill: currentColor; }
+.group { display: inline-flex; align-items: center; gap: 6px; }
+.group label, .lbl { color: var(--muted); font-size: 12px; }
+.sep { width: 1px; align-self: stretch; background: var(--border); }
+.seg { display: inline-flex; background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: 2px; }
+.seg button { border: 0; background: transparent; padding: 5px 10px; border-radius: 6px; cursor: pointer; color: var(--muted); }
+.seg button[aria-pressed="true"] { background: var(--surface); color: var(--text); box-shadow: 0 0 0 1px var(--border); }
+input[type="range"] { accent-color: var(--accent); }
+.speed-val { font-variant-numeric: tabular-nums; min-width: 64px; font-size: 12px; }
+.check { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; font-size: 13px; }
+.check input { accent-color: var(--accent); }
+.spacer { flex: 1; }
+
+.scrub { display: flex; align-items: center; gap: 12px; margin-top: 12px; }
+.scrub input { flex: 1; }
+.scrub .lbl { font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+.chart { position: relative; margin-top: 12px; height: 90px; cursor: crosshair; touch-action: none; }
+.chart svg { position: absolute; inset: 0; width: 100%; height: 72px; overflow: visible; }
+.chart .ticks { position: absolute; left: 0; right: 0; bottom: 0; height: 16px; }
+.chart .tick { position: absolute; transform: translateX(-50%); font-size: 11px; color: var(--muted); white-space: nowrap; }
+.chart .legend { position: absolute; top: -2px; left: 0; display: flex; gap: 14px; font-size: 11px; color: var(--muted); pointer-events: none; }
+.chart .legend i { display: inline-block; width: 10px; height: 3px; border-radius: 2px; vertical-align: middle; margin-right: 5px; }
+
+/* ---------- key ---------- */
+.key { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 8px 16px; margin: 0 0 12px; color: var(--muted); font-size: 12px; }
+.key .grad { display: inline-block; width: 220px; height: 12px; border-radius: 6px; vertical-align: middle; margin: 0 6px; }
+.key .sw { display: inline-block; width: 12px; height: 12px; border-radius: 3px; vertical-align: middle; margin-right: 5px; border: 1px solid var(--border); }
+
+/* ---------- grid ---------- */
+.grid { position: relative; margin: 0 auto; --dur: 300ms; }
+.tile {
+  position: absolute; left: 0; top: 0;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 3px; color: var(--tile-text); background: var(--unseen-bg);
+  font-family: "Hiragino Kaku Gothic Pro", "Hiragino Sans", "Yu Gothic UI", "Yu Gothic", Meiryo, "Noto Sans JP", "MS PGothic", sans-serif;
+  line-height: 1; user-select: none; cursor: default;
+  transition: background-color var(--dur) linear, transform var(--dur) ease-in-out, opacity var(--dur) linear, color var(--dur) linear;
+  will-change: transform;
+}
+.grid.no-anim .tile { transition: none; }
+/* during playback tiles jump to their new place instead of sliding; colors still fade */
+.grid.playing .tile { transition: background-color var(--dur) linear, opacity var(--dur) linear, color var(--dur) linear; }
+.tile.unseen { color: var(--unseen-text); }
+.tile.absent { opacity: 0; pointer-events: none; }
+.grid.fixed .tile.absent { opacity: .18; outline: 1px dashed var(--muted); outline-offset: -1px; background: transparent; color: var(--muted); }
+.tile.pulse-a { animation: pulse-a 900ms ease-out; }
+.tile.pulse-b { animation: pulse-b 900ms ease-out; }
+@keyframes pulse-a { from { box-shadow: 0 0 0 2px var(--pulse); z-index: 2; } to { box-shadow: 0 0 0 0 transparent; } }
+@keyframes pulse-b { from { box-shadow: 0 0 0 2px var(--pulse); z-index: 2; } to { box-shadow: 0 0 0 0 transparent; } }
+.tile:hover { outline: 2px solid var(--accent); outline-offset: 1px; z-index: 3; }
+
+/* ---------- tooltip ---------- */
+.tip {
+  position: fixed; z-index: 10; pointer-events: none; display: none;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+  box-shadow: 0 6px 24px rgba(0,0,0,.18); padding: 10px 12px; min-width: 170px;
+}
+.tip .k { font-size: 40px; line-height: 1; font-family: "Hiragino Kaku Gothic Pro", "Yu Gothic UI", Meiryo, "Noto Sans JP", sans-serif; display: flex; align-items: center; gap: 10px; }
+.tip .k span { font-size: 12px; font-family: system-ui, sans-serif; padding: 2px 8px; border-radius: 999px; color: #111; }
+.tip dl { display: grid; grid-template-columns: auto auto; gap: 2px 14px; margin: 8px 0 0; font-size: 12px; }
+.tip dt { color: var(--muted); }
+.tip dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
+
+/* ---------- loader ---------- */
+.loader { max-width: 560px; margin: 12vh auto; text-align: center; padding: 32px; border: 2px dashed var(--border); border-radius: 16px; background: var(--surface); }
+.loader.drag { border-color: var(--accent); background: var(--accent-soft); }
+.loader h2 { margin: 0 0 8px; }
+.loader p { color: var(--muted); }
+.loader code { background: var(--surface-2); padding: 2px 6px; border-radius: 5px; font-size: 12px; }
+.hidden { display: none !important; }
+@media (max-width: 700px) { .sep { display: none; } .date { font-size: 28px; } }
+.hint { color: var(--muted); font-size: 12px; text-align: center; margin-top: 18px; }
+kbd { background: var(--surface-2); border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 4px; padding: 0 5px; font-size: 11px; }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <div id="loader" class="loader hidden">
+    <h2>Load timelapse data</h2>
+    <p>Run <code>python extract_kanji_data.py &lt;export.json&gt;</code> next to this file to create
+      <code>kanji_timelapse.js</code>, or drop / pick the generated <code>kanji_timelapse.json</code> here.</p>
+    <label class="btn primary">Choose file<input id="fileInput" type="file" accept=".json,application/json" hidden></label>
+    <p id="loadError" style="color:#d33"></p>
+  </div>
+
+  <div id="app" class="hidden">
+    <div class="top">
+      <div>
+        <h1 class="title" id="deckTitle">Kanji Grid</h1>
+        <div class="date" id="dateLabel">–</div>
+      </div>
+      <div class="stats">
+        <div class="stat"><div class="label">Known</div><div class="value" id="sKnown">–</div></div>
+        <div class="stat"><div class="label">Avg score</div><div class="value" id="sScore">–</div></div>
+        <div class="stat"><div class="label">Changed today</div><div class="value" id="sChanged">–</div></div>
+        <div class="stat"><div class="label">Day</div><div class="value" id="sDay">–</div></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="controls">
+        <button class="btn" id="bStart" title="First day (Home)"><svg viewBox="0 0 24 24"><path d="M6 5h2v14H6zM20 5v14L9 12z"/></svg></button>
+        <button class="btn" id="bPrev" title="Previous day (←)"><svg viewBox="0 0 24 24"><path d="M16 5v14L5 12z"/></svg></button>
+        <button class="btn primary" id="bPlay" title="Play / pause (Space)"></button>
+        <button class="btn" id="bNext" title="Next day (→)"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg></button>
+        <button class="btn" id="bEnd" title="Last day (End)"><svg viewBox="0 0 24 24"><path d="M16 5h2v14h-2zM4 5v14l11-7z"/></svg></button>
+        <div class="sep"></div>
+        <div class="group">
+          <label for="speed">Speed</label>
+          <input id="speed" type="range" min="0" max="100" value="45">
+          <span class="speed-val" id="speedVal"></span>
+        </div>
+        <div class="sep"></div>
+        <div class="group">
+          <span class="lbl">Layout</span>
+          <div class="seg" id="layoutSeg">
+            <button data-layout="fixed" aria-pressed="true" title="Every kanji keeps its place">Fixed</button>
+            <button data-layout="sorted" aria-pressed="false" title="Sorted by strength, like Kanji Grid">By strength</button>
+          </div>
+        </div>
+        <div class="group">
+          <label for="size">Tile</label>
+          <input id="size" type="range" min="14" max="44" value="24" style="width:90px">
+        </div>
+        <label class="check"><input type="checkbox" id="cPulse" checked> Highlight changes</label>
+        <label class="check"><input type="checkbox" id="cLoop"> Loop</label>
+        <div class="spacer"></div>
+        <button class="btn" id="bTheme" title="Toggle light / dark">◐</button>
+        <label class="btn" title="Load another kanji_timelapse.json">Load…<input id="fileInput2" type="file" accept=".json,application/json" hidden></label>
+      </div>
+
+      <div class="scrub">
+        <span class="lbl" id="firstDate"></span>
+        <input id="slider" type="range" min="0" max="0" value="0">
+        <span class="lbl" id="lastDate"></span>
+      </div>
+
+      <div class="chart" id="chart">
+        <div class="legend">
+          <span><i style="background:var(--accent)"></i>Known %</span>
+          <span><i style="background:var(--bar)"></i>Tiles changed per day</span>
+        </div>
+        <svg id="chartSvg" preserveAspectRatio="none">
+          <g id="bars"></g>
+          <path id="knownArea" fill="var(--accent-soft)" stroke="none"></path>
+          <path id="knownLine" fill="none" stroke="var(--accent)" stroke-width="2" vector-effect="non-scaling-stroke"></path>
+          <line id="cursor" y1="0" y2="100" stroke="var(--text)" stroke-width="1" vector-effect="non-scaling-stroke"></line>
+        </svg>
+        <div class="ticks" id="ticks"></div>
+      </div>
+    </div>
+
+    <div class="key" id="key"></div>
+    <div class="grid fixed" id="grid"></div>
+    <div class="hint"><kbd>Space</kbd> play/pause · <kbd>←</kbd> <kbd>→</kbd> step a day · <kbd>Shift</kbd>+<kbd>←</kbd> <kbd>→</kbd> step a week · <kbd>Home</kbd> <kbd>End</kbd> jump · hover a tile for details</div>
+  </div>
+</div>
+
+<div class="tip" id="tip"></div>
+
+<script src="kanji_timelapse.js" onerror="void 0"></script>
+<script>
+(() => {
+  "use strict";
+  const $ = (id) => document.getElementById(id);
+  const PLAY_ICON = '<svg viewBox="0 0 24 24"><path d="M7 5v14l12-7z"/></svg>Play';
+  const PAUSE_ICON = '<svg viewBox="0 0 24 24"><path d="M6 5h4v14H6zM14 5h4v14h-4z"/></svg>Pause';
+  const GAP = 2;
+  const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+  // ---------- state ----------
+  let D = 0, N = 0;
+  let data, kanji, colors, unseenColor;
+  let colorAt, ivlAt, scoreAt, seenAt, unseenAt, changedAt; // flat [day * N + k]
+  let changedCount, avgScore;
+  let tiles = [], shownColor, shownPos;
+  let day = 0, playing = false, layout = "fixed", tileSize = 24, cols = 1;
+  let lastTick = 0, acc = 0, pulseFlip = false, hoverK = -1;
+
+  const store = {
+    get(key) { try { return localStorage.getItem("kgtl." + key); } catch { return null; } },
+    set(key, v) { try { localStorage.setItem("kgtl." + key, v); } catch { } },
+  };
+
+  // speed slider 0..100 maps exponentially to 0.5..60 days per second
+  const speedFromSlider = (v) => 0.5 * Math.pow(120, v / 100);
+  let daysPerSec = speedFromSlider(+$("speed").value);
+
+  // ---------- data ----------
+  function load(json) {
+    if (!json || !Array.isArray(json.days) || typeof json.kanji !== "string") throw new Error("This doesn't look like kanji_timelapse.json");
+    stop();
+    data = json;
+    kanji = Array.from(json.kanji);
+    colors = json.colors;
+    unseenColor = colors.findIndex((c) => c.toLowerCase() === "#fff" || c.toLowerCase() === "#ffffff");
+    D = json.days.length;
+    N = kanji.length;
+
+    colorAt = new Int16Array(D * N);
+    ivlAt = new Int32Array(D * N);
+    scoreAt = new Int16Array(D * N);
+    seenAt = new Int32Array(D * N);
+    unseenAt = new Int32Array(D * N);
+    changedAt = new Uint8Array(D * N);
+    changedCount = new Int32Array(D);
+    avgScore = new Float64Array(D);
+
+    const cur = { c: new Int16Array(N).fill(-1), i: new Int32Array(N).fill(-1), s: new Int16Array(N).fill(-1), se: new Int32Array(N), un: new Int32Array(N) };
+    json.days.forEach((d, di) => {
+      const ch = d.changes;
+      for (let j = 0; j < ch.length; j += 6) {
+        const k = ch[j];
+        cur.c[k] = ch[j + 1]; cur.i[k] = ch[j + 2]; cur.s[k] = ch[j + 3]; cur.se[k] = ch[j + 4]; cur.un[k] = ch[j + 5];
+        if (di > 0) changedAt[di * N + k] = 1;
+      }
+      changedCount[di] = di > 0 ? ch.length / 6 : 0;
+      const o = di * N;
+      colorAt.set(cur.c, o); ivlAt.set(cur.i, o); scoreAt.set(cur.s, o); seenAt.set(cur.se, o); unseenAt.set(cur.un, o);
+      let sum = 0, n = 0;
+      for (let k = 0; k < N; k++) if (cur.s[k] >= 0) { sum += cur.s[k]; n++; }
+      avgScore[di] = n ? sum / n / 100 : NaN;
+    });
+
+    buildGrid();
+    buildChart();
+    buildKey();
+    $("deckTitle").textContent = `Kanji Grid${json.deck ? " · " + json.deck : ""} · Timelapse`;
+    $("slider").max = D - 1;
+    $("firstDate").textContent = fmtShort(json.days[0].date);
+    $("lastDate").textContent = fmtShort(json.days[D - 1].date);
+    $("loader").classList.add("hidden");
+    $("app").classList.remove("hidden");
+    thinTicks();
+    setTileSize(+$("size").value);
+    show(0, false);
+  }
+
+  // ---------- grid ----------
+  function buildGrid() {
+    const grid = $("grid");
+    grid.textContent = "";
+    tiles = kanji.map((ch, k) => {
+      const t = document.createElement("div");
+      t.className = "tile";
+      t.textContent = ch;
+      t.dataset.k = k;
+      grid.appendChild(t);
+      return t;
+    });
+    shownColor = new Int16Array(N).fill(-2);
+    shownPos = new Int32Array(N).fill(-1);
+  }
+
+  function setTileSize(px) {
+    tileSize = px;
+    for (const t of tiles) {
+      t.style.width = t.style.height = px + "px";
+      t.style.fontSize = Math.round(px * 0.68) + "px";
+    }
+    layoutGrid();
+  }
+
+  function layoutGrid() {
+    if (!D) return;
+    const grid = $("grid");
+    const width = grid.parentElement.clientWidth;
+    const pitch = tileSize + GAP;
+    cols = Math.max(1, Math.floor((width + GAP) / pitch));
+    grid.style.width = (cols * pitch - GAP) + "px";
+    shownPos.fill(-1);
+    placeTiles(false);
+  }
+
+  // order of kanji for the current day in the current layout
+  function orderFor(d) {
+    const o = d * N;
+    const ks = [];
+    for (let k = 0; k < N; k++) if (layout === "fixed" || colorAt[o + k] >= 0) ks.push(k);
+    if (layout === "sorted") {
+      // reviewed (by interval, strongest first) → seen but not reviewed yet → unseen
+      const group = (k) => ivlAt[o + k] >= 0 ? 0 : seenAt[o + k] > 0 ? 1 : 2;
+      ks.sort((a, b) => group(a) - group(b) || ivlAt[o + b] - ivlAt[o + a] || a - b);
+      // kanji missing from this day go last, invisible
+      for (let k = 0; k < N; k++) if (colorAt[o + k] < 0) ks.push(k);
+    }
+    return ks;
+  }
+
+  function placeTiles(animate) {
+    const grid = $("grid");
+    if (!animate) grid.classList.add("no-anim");
+    const pitch = tileSize + GAP;
+    const ks = orderFor(day);
+    let visible = 0;
+    ks.forEach((k, i) => {
+      if (layout === "fixed" || colorAt[day * N + k] >= 0) visible = i + 1;
+      if (shownPos[k] === i) return;
+      shownPos[k] = i;
+      tiles[k].style.transform = `translate(${(i % cols) * pitch}px, ${Math.floor(i / cols) * pitch}px)`;
+    });
+    grid.style.height = (Math.ceil(visible / cols) * pitch - GAP) + "px";
+    if (!animate) { void grid.offsetHeight; grid.classList.remove("no-anim"); }
+  }
+
+  function paintTiles(animate) {
+    const grid = $("grid");
+    if (!animate) grid.classList.add("no-anim");
+    const o = day * N;
+    const pulse = animate && $("cPulse").checked;
+    pulseFlip = !pulseFlip;
+    const add = pulseFlip ? "pulse-a" : "pulse-b", rem = pulseFlip ? "pulse-b" : "pulse-a";
+    for (let k = 0; k < N; k++) {
+      const c = colorAt[o + k], t = tiles[k];
+      if (c !== shownColor[k]) {
+        shownColor[k] = c;
+        t.classList.toggle("absent", c < 0);
+        t.classList.toggle("unseen", c === unseenColor);
+        t.style.backgroundColor = c < 0 || c === unseenColor ? "" : colors[c];
+      }
+      if (pulse && changedAt[o + k]) { t.classList.remove(rem); t.classList.add(add); }
+      else if (t.classList.contains(rem) || t.classList.contains(add)) { t.classList.remove(rem, add); }
+    }
+    if (!animate) { void grid.offsetHeight; grid.classList.remove("no-anim"); }
+  }
+
+  // ---------- display ----------
+  function show(d, animate = true) {
+    day = Math.max(0, Math.min(D - 1, d));
+    const info = data.days[day];
+    // transitions roughly as long as one day is on screen, so playback looks continuous
+    const dur = playing ? Math.min(800, Math.max(60, 900 / daysPerSec)) : 220;
+    $("grid").style.setProperty("--dur", dur + "ms");
+    $("grid").classList.toggle("playing", playing);
+    paintTiles(animate);
+    if (layout === "sorted") placeTiles(animate);
+
+    const dt = new Date(info.date + "T00:00:00");
+    $("dateLabel").textContent = `${WEEKDAYS[dt.getDay()]} ${dt.getDate()} ${MONTHS[dt.getMonth()]} ${dt.getFullYear()}`;
+    const pct = info.total ? (100 * info.known / info.total) : 0;
+    $("sKnown").innerHTML = `${info.known} <small>/ ${info.total} · ${pct.toFixed(1)}%</small>`;
+    $("sScore").textContent = isNaN(avgScore[day]) ? "–" : avgScore[day].toFixed(2);
+    $("sChanged").textContent = changedCount[day];
+    $("sDay").innerHTML = `${day + 1} <small>/ ${D}</small>`;
+    $("slider").value = day;
+    $("cursor").setAttribute("x1", day); $("cursor").setAttribute("x2", day);
+    if (hoverK >= 0) renderTip(hoverK);
+  }
+
+  // ---------- chart ----------
+  function buildChart() {
+    const svg = $("chartSvg");
+    const W = Math.max(1, D - 1);
+    svg.setAttribute("viewBox", `0 0 ${W} 100`);
+    const maxCh = Math.max(1, ...changedCount);
+    let bars = "";
+    const bw = Math.max(0.6, W / D * 0.7);
+    for (let i = 1; i < D; i++) {
+      const h = changedCount[i] / maxCh * 45;
+      if (h > 0) bars += `<rect x="${i - bw / 2}" y="${100 - h}" width="${bw}" height="${h}" fill="var(--bar)"/>`;
+    }
+    $("bars").innerHTML = bars;
+    let line = "";
+    data.days.forEach((d, i) => {
+      const y = 100 - (d.total ? d.known / d.total * 100 : 0);
+      line += (i ? "L" : "M") + i + " " + y.toFixed(2);
+    });
+    $("knownLine").setAttribute("d", line);
+    $("knownArea").setAttribute("d", line + `L${W} 100L0 100Z`);
+
+    // month ticks
+    let ticks = "", lastMonth = "";
+    data.days.forEach((d, i) => {
+      const m = d.date.slice(0, 7);
+      if (m !== lastMonth) {
+        lastMonth = m;
+        if (d.date.slice(8) <= "03") {
+          const mi = +d.date.slice(5, 7) - 1;
+          const label = mi === 0 ? `${MONTHS[0]} ’${d.date.slice(2, 4)}` : MONTHS[mi];
+          ticks += `<span class="tick" style="left:${i / W * 100}%">${label}</span>`;
+        }
+      }
+    });
+    $("ticks").innerHTML = ticks;
+    thinTicks();
+  }
+
+  // hide month labels that would overlap the one before them
+  function thinTicks() {
+    let right = -Infinity;
+    for (const t of $("ticks").children) {
+      t.style.visibility = "";
+      const r = t.getBoundingClientRect();
+      if (r.left < right + 6) t.style.visibility = "hidden";
+      else right = r.right;
+    }
+  }
+
+  function chartDay(e) {
+    const r = $("chart").getBoundingClientRect();
+    return Math.round(Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)) * (D - 1));
+  }
+  $("chart").addEventListener("pointerdown", (e) => {
+    stop();
+    $("chart").setPointerCapture(e.pointerId);
+    show(chartDay(e));
+  });
+  $("chart").addEventListener("pointermove", (e) => {
+    if ($("chart").hasPointerCapture(e.pointerId)) show(chartDay(e));
+  });
+
+  function buildKey() {
+    const pal = data.palette && data.palette.length ? data.palette : ["#E62E2E", "#E6E62E", "#2EE6E6"];
+    $("key").innerHTML =
+      `<span>Weak<span class="grad" style="background:linear-gradient(90deg,${pal.join(",")})"></span>Strong</span>` +
+      `<span><span class="sw" style="background:var(--unseen-bg)"></span>Unseen</span>` +
+      `<span><span class="sw" style="background:transparent;border-style:dashed"></span>Not in deck yet</span>`;
+  }
+
+  // ---------- tooltip ----------
+  function renderTip(k) {
+    const o = day * N + k, c = colorAt[o];
+    const status = c < 0 ? "Not in deck yet" : c === unseenColor ? "Unseen" : ivlAt[o] < 0 ? "Learning" : "Reviewed";
+    const chip = c >= 0 && c !== unseenColor ? colors[c] : "var(--surface-2)";
+    const row = (a, b) => `<dt>${a}</dt><dd>${b}</dd>`;
+    let first = -1;
+    for (let d = 0; d < D; d++) if (seenAt[d * N + k] > 0) { first = d; break; }
+    $("tip").innerHTML =
+      `<div class="k">${kanji[k]}<span style="background:${chip};${c === unseenColor || c < 0 ? "color:var(--text)" : ""}">${status}</span></div><dl>` +
+      row("Avg interval", ivlAt[o] >= 0 ? (ivlAt[o] / 100).toFixed(1) + " d" : "–") +
+      row("Score", scoreAt[o] >= 0 ? (scoreAt[o] / 100).toFixed(2) : "–") +
+      row("Seen cards", seenAt[o]) +
+      row("Unseen cards", unseenAt[o]) +
+      row("First seen", first >= 0 ? fmtShort(data.days[first].date) : "–") +
+      `</dl>`;
+  }
+  function moveTip(e) {
+    const tip = $("tip"), pad = 14;
+    let x = e.clientX + pad, y = e.clientY + pad;
+    const r = tip.getBoundingClientRect();
+    if (x + r.width > innerWidth - 8) x = e.clientX - r.width - pad;
+    if (y + r.height > innerHeight - 8) y = e.clientY - r.height - pad;
+    tip.style.left = Math.max(8, x) + "px"; tip.style.top = Math.max(8, y) + "px";
+  }
+  $("grid").addEventListener("pointerover", (e) => {
+    const t = e.target.closest(".tile");
+    if (!t) return;
+    hoverK = +t.dataset.k;
+    renderTip(hoverK);
+    $("tip").style.display = "block";
+    moveTip(e);
+  });
+  $("grid").addEventListener("pointermove", (e) => { if (hoverK >= 0) moveTip(e); });
+  $("grid").addEventListener("pointerout", (e) => {
+    if (!e.relatedTarget || !e.relatedTarget.closest || !e.relatedTarget.closest(".tile")) { hoverK = -1; $("tip").style.display = "none"; }
+  });
+
+  // ---------- playback ----------
+  function frame(now) {
+    if (!playing) return;
+    acc += (now - lastTick) / 1000;
+    lastTick = now;
+    const step = 1 / daysPerSec;
+    if (acc >= step) {
+      // at high speeds skip days rather than fall behind
+      const n = Math.min(Math.floor(acc / step), 30);
+      acc -= n * step;
+      if (acc > step) acc = 0;
+      let next = day + n;
+      if (next >= D) {
+        if ($("cLoop").checked) next = 0;
+        else { show(D - 1); stop(); return; }
+      }
+      show(next);
+    }
+    requestAnimationFrame(frame);
+  }
+  function play() {
+    if (!D) return;
+    if (day >= D - 1) show(0, false);
+    playing = true; acc = 0; lastTick = performance.now();
+    $("bPlay").innerHTML = PAUSE_ICON;
+    requestAnimationFrame(frame);
+  }
+  function stop() {
+    playing = false;
+    $("grid").classList.remove("playing");
+    $("bPlay").innerHTML = PLAY_ICON;
+  }
+  const toggle = () => (playing ? stop() : play());
+
+  // ---------- controls ----------
+  $("bPlay").addEventListener("click", toggle);
+  $("bPrev").addEventListener("click", () => { stop(); show(day - 1); });
+  $("bNext").addEventListener("click", () => { stop(); show(day + 1); });
+  $("bStart").addEventListener("click", () => { stop(); show(0); });
+  $("bEnd").addEventListener("click", () => { stop(); show(D - 1); });
+  $("slider").addEventListener("input", (e) => { stop(); show(+e.target.value); });
+
+  function setSpeed(v) {
+    $("speed").value = v;
+    daysPerSec = speedFromSlider(+v);
+    $("speedVal").textContent = (daysPerSec < 10 ? daysPerSec.toFixed(1) : Math.round(daysPerSec)) + " days/s";
+    store.set("speed", v);
+  }
+  $("speed").addEventListener("input", (e) => setSpeed(e.target.value));
+
+  function setLayout(l) {
+    layout = l;
+    for (const b of $("layoutSeg").children) b.setAttribute("aria-pressed", b.dataset.layout === l);
+    $("grid").classList.toggle("fixed", l === "fixed");
+    store.set("layout", l);
+    if (D) placeTiles(true);
+  }
+  $("layoutSeg").addEventListener("click", (e) => { const b = e.target.closest("button"); if (b) setLayout(b.dataset.layout); });
+
+  $("size").addEventListener("input", (e) => { setTileSize(+e.target.value); store.set("size", e.target.value); });
+  $("cLoop").addEventListener("change", (e) => store.set("loop", e.target.checked ? "1" : "0"));
+  $("cPulse").addEventListener("change", (e) => store.set("pulse", e.target.checked ? "1" : "0"));
+
+  $("bTheme").addEventListener("click", () => {
+    const root = document.documentElement;
+    const dark = root.dataset.theme ? root.dataset.theme === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+    root.dataset.theme = dark ? "light" : "dark";
+    store.set("theme", root.dataset.theme);
+  });
+
+  document.addEventListener("keydown", (e) => {
+    if (!D || e.target.matches("input[type=number], input[type=text]")) return;
+    const big = e.shiftKey ? 7 : 1;
+    if (e.code === "Space") { e.preventDefault(); toggle(); }
+    else if (e.key === "ArrowRight") { e.preventDefault(); stop(); show(day + big); }
+    else if (e.key === "ArrowLeft") { e.preventDefault(); stop(); show(day - big); }
+    else if (e.key === "Home") { e.preventDefault(); stop(); show(0); }
+    else if (e.key === "End") { e.preventDefault(); stop(); show(D - 1); }
+    else return;
+    if (document.activeElement && document.activeElement.blur && document.activeElement !== document.body) document.activeElement.blur();
+  });
+
+  let resizeTimer;
+  addEventListener("resize", () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(() => { layoutGrid(); if (D) thinTicks(); }, 100); });
+
+  // ---------- file loading ----------
+  function readFile(file) {
+    if (!file) return;
+    const r = new FileReader();
+    r.onload = () => {
+      try { load(JSON.parse(r.result)); $("loadError").textContent = ""; }
+      catch (err) { $("loadError").textContent = err.message; $("loader").classList.remove("hidden"); }
+    };
+    r.readAsText(file);
+  }
+  $("fileInput").addEventListener("change", (e) => readFile(e.target.files[0]));
+  $("fileInput2").addEventListener("change", (e) => readFile(e.target.files[0]));
+  const loader = $("loader");
+  ["dragenter", "dragover"].forEach((t) => document.addEventListener(t, (e) => { e.preventDefault(); loader.classList.add("drag"); }));
+  ["dragleave", "drop"].forEach((t) => document.addEventListener(t, (e) => { e.preventDefault(); loader.classList.remove("drag"); }));
+  document.addEventListener("drop", (e) => readFile(e.dataTransfer.files[0]));
+
+  function fmtShort(iso) {
+    const [y, m, d] = iso.split("-");
+    return `${+d} ${MONTHS[+m - 1]} ${y}`;
+  }
+
+  // ---------- start ----------
+  const theme = store.get("theme");
+  if (theme) document.documentElement.dataset.theme = theme;
+  setSpeed(store.get("speed") ?? $("speed").value);
+  if (store.get("loop") === "1") $("cLoop").checked = true;
+  if (store.get("pulse") === "0") $("cPulse").checked = false;
+  $("bPlay").innerHTML = PLAY_ICON;
+
+  if (store.get("size")) $("size").value = store.get("size");
+  setLayout(store.get("layout") || "fixed");
+
+  if (window.KANJI_TIMELAPSE) load(window.KANJI_TIMELAPSE);
+  else $("loader").classList.remove("hidden");
+})();
+</script>
+</body>
+</html>
