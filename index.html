@@ -15,7 +15,7 @@
   --accent: #2f6fdf;
   --accent-soft: rgba(47, 111, 223, 0.14);
   --unseen-bg: #ffffff;
-  --unseen-text: #9a9893;
+  --unseen-text: #74726c;
   --tile-text: #111;
   --pulse: #1d1d1f;
   --bar: #c9c6be;
@@ -32,7 +32,7 @@
     --accent: #6ea2ff;
     --accent-soft: rgba(110, 162, 255, 0.16);
     --unseen-bg: #2b2d33;
-    --unseen-text: #6f727a;
+    --unseen-text: #a3a7b0;
     --tile-text: #111;
     --pulse: #ffffff;
     --bar: #3d4047;
@@ -49,7 +49,7 @@
   --accent: #6ea2ff;
   --accent-soft: rgba(110, 162, 255, 0.16);
   --unseen-bg: #2b2d33;
-  --unseen-text: #6f727a;
+  --unseen-text: #a3a7b0;
   --tile-text: #111;
   --pulse: #ffffff;
   --bar: #3d4047;
@@ -126,27 +126,9 @@ input[type="range"] { accent-color: var(--accent); }
 .key .sw { display: inline-block; width: 12px; height: 12px; border-radius: 3px; vertical-align: middle; margin-right: 5px; border: 1px solid var(--border); }
 
 /* ---------- grid ---------- */
-.grid { position: relative; margin: 0 auto; --dur: 300ms; }
-.tile {
-  position: absolute; left: 0; top: 0;
-  display: flex; align-items: center; justify-content: center;
-  border-radius: 3px; color: var(--tile-text); background: var(--unseen-bg);
-  font-family: "Hiragino Kaku Gothic Pro", "Hiragino Sans", "Yu Gothic UI", "Yu Gothic", Meiryo, "Noto Sans JP", "MS PGothic", sans-serif;
-  line-height: 1; user-select: none; cursor: default;
-  transition: background-color var(--dur) linear, transform var(--dur) ease-in-out, opacity var(--dur) linear, color var(--dur) linear;
-  will-change: transform;
-}
-.grid.no-anim .tile { transition: none; }
-/* during playback tiles jump to their new place instead of sliding; colors still fade */
-.grid.playing .tile { transition: background-color var(--dur) linear, opacity var(--dur) linear, color var(--dur) linear; }
-.tile.unseen { color: var(--unseen-text); }
-.tile.absent { opacity: 0; pointer-events: none; }
-.grid.fixed .tile.absent { opacity: .18; outline: 1px dashed var(--muted); outline-offset: -1px; background: transparent; color: var(--muted); }
-.tile.pulse-a { animation: pulse-a 900ms ease-out; }
-.tile.pulse-b { animation: pulse-b 900ms ease-out; }
-@keyframes pulse-a { from { box-shadow: 0 0 0 2px var(--pulse); z-index: 2; } to { box-shadow: 0 0 0 0 transparent; } }
-@keyframes pulse-b { from { box-shadow: 0 0 0 2px var(--pulse); z-index: 2; } to { box-shadow: 0 0 0 0 transparent; } }
-.tile:hover { outline: 2px solid var(--accent); outline-offset: 1px; z-index: 3; }
+.grid-wrap { position: relative; margin: 0 auto; }
+.grid-wrap canvas { display: block; }
+.hover-box { position: absolute; left: 0; top: 0; display: none; pointer-events: none; border-radius: 3px; outline: 2px solid var(--accent); outline-offset: 1px; }
 
 /* ---------- tooltip ---------- */
 .tip {
@@ -251,7 +233,7 @@ kbd { background: var(--surface-2); border: 1px solid var(--border); border-bott
     </div>
 
     <div class="key" id="key"></div>
-    <div class="grid fixed" id="grid"></div>
+    <div class="grid-wrap" id="gridWrap"><canvas id="grid"></canvas><div class="hover-box" id="hoverBox"></div></div>
     <div class="hint"><kbd>Space</kbd> play/pause · <kbd>←</kbd> <kbd>→</kbd> step a day · <kbd>Shift</kbd>+<kbd>←</kbd> <kbd>→</kbd> step a week · <kbd>Home</kbd> <kbd>End</kbd> jump · hover a tile for details</div>
   </div>
 </div>
@@ -274,9 +256,8 @@ kbd { background: var(--surface-2); border: 1px solid var(--border); border-bott
   let data, kanji, colors, unseenColor;
   let colorAt, ivlAt, scoreAt, seenAt, unseenAt, changedAt; // flat [day * N + k]
   let changedCount, avgScore;
-  let tiles = [], shownColor, shownPos;
   let day = 0, playing = false, layout = "fixed", tileSize = 24, cols = 1;
-  let lastTick = 0, acc = 0, pulseFlip = false, hoverK = -1;
+  let lastTick = 0, acc = 0, hoverK = -1, pointer = null;
 
   const store = {
     get(key) { try { return localStorage.getItem("kgtl." + key); } catch { return null; } },
@@ -338,39 +319,108 @@ kbd { background: var(--surface-2); border: 1px solid var(--border); border-bott
   }
 
   // ---------- grid ----------
+  // Drawn on one canvas. Each frame only the tiles that are fading, pulsing or
+  // that moved get redrawn; a full redraw happens only on resize/layout changes.
+  // Everything is laid out in whole device pixels, so redrawing one tile never
+  // touches the edge pixels of its neighbors (matters at 125%/150% scaling).
+  // The canvas is opaque (it paints the page background itself), which lets the
+  // browser use subpixel/ClearType text smoothing like normal page text.
+  const canvas = $("grid"), ctx = canvas.getContext("2d", { alpha: false });
+  const PULSE_MS = 900, MOVE_MS = 450;
+  const FONT_SCALE = 0.74, FONT_WEIGHT = 400;
+  const FONT = '"Hiragino Kaku Gothic Pro", "Hiragino Sans", "Yu Gothic UI", "Yu Gothic", Meiryo, "Noto Sans JP", "MS PGothic", sans-serif';
+  let colorsRGB = [], theme = {};
+  let shownColor, slotK = new Int32Array(0), dpr = 1;
+  let ts = 24, gp = 2, pitch = 26, radius = 3; // tile, gap, tile + gap, corner radius in device pixels
+  let glyphDx = 0, glyphDy = 0; // offset from a tile's corner to the text origin that centers a kanji
+  let posX, posY, fromX, fromY, toX, toY, moveT0 = 0, moving = false;
+  let fromRGB, curRGB, toRGB, colorT0, pulseT0, colorDur = 220;
+  let fullRedraw = true, rafId = 0;
+  const active = new Set(); // tiles mid fade/pulse
+  const dirty = new Set();  // tiles to redraw once
+
+  function hexRGB(hex) {
+    hex = hex.trim().replace("#", "");
+    if (hex.length === 3) hex = [...hex].map((h) => h + h).join("");
+    const n = parseInt(hex, 16);
+    return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+  }
+  const targetRGB = (c) => (c >= 0 && c !== unseenColor ? colorsRGB[c] : theme.unseenBg);
+
+  function readTheme() {
+    const cs = getComputedStyle(document.documentElement);
+    const v = (name) => cs.getPropertyValue(name).trim();
+    theme = { bg: v("--bg"), unseenBg: hexRGB(v("--unseen-bg")), unseenText: v("--unseen-text"), tileText: v("--tile-text"), pulse: v("--pulse"), muted: v("--muted") };
+    if (!D) return;
+    for (let k = 0; k < N; k++) {
+      const rgb = targetRGB(shownColor[k]);
+      for (let j = 0; j < 3; j++) fromRGB[k * 3 + j] = curRGB[k * 3 + j] = toRGB[k * 3 + j] = rgb[j];
+    }
+    active.clear();
+    fullRedraw = true;
+    requestDraw();
+  }
+
   function buildGrid() {
-    const grid = $("grid");
-    grid.textContent = "";
-    tiles = kanji.map((ch, k) => {
-      const t = document.createElement("div");
-      t.className = "tile";
-      t.textContent = ch;
-      t.dataset.k = k;
-      grid.appendChild(t);
-      return t;
-    });
+    colorsRGB = colors.map(hexRGB);
     shownColor = new Int16Array(N).fill(-2);
-    shownPos = new Int32Array(N).fill(-1);
+    posX = new Float32Array(N).fill(-1); posY = new Float32Array(N).fill(-1);
+    fromX = new Float32Array(N); fromY = new Float32Array(N); toX = new Float32Array(N); toY = new Float32Array(N);
+    fromRGB = new Float32Array(N * 3); curRGB = new Float32Array(N * 3); toRGB = new Float32Array(N * 3);
+    colorT0 = new Float64Array(N); pulseT0 = new Float64Array(N).fill(-1e9);
+    active.clear(); dirty.clear();
+    moving = false;
+    readTheme();
   }
 
   function setTileSize(px) {
     tileSize = px;
-    for (const t of tiles) {
-      t.style.width = t.style.height = px + "px";
-      t.style.fontSize = Math.round(px * 0.68) + "px";
-    }
+    fullRedraw = true;
     layoutGrid();
   }
 
   function layoutGrid() {
     if (!D) return;
-    const grid = $("grid");
-    const width = grid.parentElement.clientWidth;
-    const pitch = tileSize + GAP;
-    cols = Math.max(1, Math.floor((width + GAP) / pitch));
-    grid.style.width = (cols * pitch - GAP) + "px";
-    shownPos.fill(-1);
+    const width = $("gridWrap").parentElement.clientWidth;
+    dpr = Math.min(devicePixelRatio || 1, 3);
+    cols = Math.max(1, Math.floor((width + GAP) / (tileSize + GAP)));
+    // keep long grids under browser canvas size limits
+    const area = (cols * (tileSize + GAP)) * (Math.ceil(N / cols) * (tileSize + GAP)) * dpr * dpr;
+    if (area > 16e6) dpr = Math.max(1, dpr * Math.sqrt(16e6 / area));
+    ts = Math.round(tileSize * dpr);
+    gp = Math.max(1, Math.round(GAP * dpr));
+    pitch = ts + gp;
+    radius = Math.round(3 * dpr);
+    cols = Math.max(1, Math.floor((width * dpr + gp) / pitch));
+    moving = false;
+    fullRedraw = true;
     placeTiles(false);
+    requestDraw();
+  }
+
+  // w, h: grid size in device pixels; the canvas adds a gap-wide margin for edge rings
+  function sizeCanvas(w, h) {
+    const W = w + 2 * gp, H = h + 2 * gp;
+    if (W === canvas.width && H === canvas.height && !fullRedraw) return;
+    canvas.width = W; canvas.height = H;
+    canvas.style.width = W / dpr + "px"; canvas.style.height = H / dpr + "px";
+    const wrap = $("gridWrap");
+    wrap.style.width = W / dpr + "px";
+    // nudge the canvas onto whole device pixels so the browser doesn't resample (blur) it
+    wrap.style.transform = "";
+    const r = canvas.getBoundingClientRect();
+    const fx = ((r.left + scrollX) * dpr) % 1, fy = ((r.top + scrollY) * dpr) % 1;
+    if (fx || fy) wrap.style.transform = `translate(${-fx / dpr}px, ${-fy / dpr}px)`;
+    ctx.setTransform(1, 0, 0, 1, gp, gp);
+    ctx.font = `${FONT_WEIGHT} ${Math.round(ts * FONT_SCALE)}px ${FONT}`;
+    // center on a real kanji's ink box rather than the font's em box (Japanese fonts
+    // sit glyphs off-center in it), and keep text on whole pixels so it stays crisp
+    ctx.textAlign = "left";
+    ctx.textBaseline = "alphabetic";
+    const m = ctx.measureText("国");
+    glyphDx = Math.round((ts - (m.actualBoundingBoxLeft + m.actualBoundingBoxRight)) / 2 + m.actualBoundingBoxLeft);
+    glyphDy = Math.round((ts + m.actualBoundingBoxAscent - m.actualBoundingBoxDescent) / 2);
+    fullRedraw = true;
   }
 
   // order of kanji for the current day in the current layout
@@ -389,52 +439,134 @@ kbd { background: var(--surface-2); border: 1px solid var(--border); border-bott
   }
 
   function placeTiles(animate) {
-    const grid = $("grid");
-    if (!animate) grid.classList.add("no-anim");
-    const pitch = tileSize + GAP;
+    const o = day * N;
     const ks = orderFor(day);
     let visible = 0;
     ks.forEach((k, i) => {
-      if (layout === "fixed" || colorAt[day * N + k] >= 0) visible = i + 1;
-      if (shownPos[k] === i) return;
-      shownPos[k] = i;
-      tiles[k].style.transform = `translate(${(i % cols) * pitch}px, ${Math.floor(i / cols) * pitch}px)`;
+      if (layout === "fixed" || colorAt[o + k] >= 0) visible = i + 1;
+      const x = (i % cols) * pitch, y = Math.floor(i / cols) * pitch;
+      const moved = posX[k] !== x || posY[k] !== y;
+      fromX[k] = posX[k]; fromY[k] = posY[k]; toX[k] = x; toY[k] = y;
+      if (!moved) return;
+      if (animate && posX[k] >= 0) moving = true;
+      else { posX[k] = x; posY[k] = y; dirty.add(k); }
     });
-    grid.style.height = (Math.ceil(visible / cols) * pitch - GAP) + "px";
-    if (!animate) { void grid.offsetHeight; grid.classList.remove("no-anim"); }
+    if (moving) moveT0 = performance.now();
+    if (visible !== slotK.length) fullRedraw = true; // clear slots that emptied
+    slotK = Int32Array.from(ks.slice(0, visible));
+    sizeCanvas(cols * pitch - gp, Math.max(1, Math.ceil(visible / cols) * pitch - gp));
   }
 
   function paintTiles(animate) {
-    const grid = $("grid");
-    if (!animate) grid.classList.add("no-anim");
-    const o = day * N;
+    const o = day * N, now = performance.now();
     const pulse = animate && $("cPulse").checked;
-    pulseFlip = !pulseFlip;
-    const add = pulseFlip ? "pulse-a" : "pulse-b", rem = pulseFlip ? "pulse-b" : "pulse-a";
     for (let k = 0; k < N; k++) {
-      const c = colorAt[o + k], t = tiles[k];
+      const c = colorAt[o + k];
       if (c !== shownColor[k]) {
+        const fade = animate && shownColor[k] !== -2;
         shownColor[k] = c;
-        t.classList.toggle("absent", c < 0);
-        t.classList.toggle("unseen", c === unseenColor);
-        t.style.backgroundColor = c < 0 || c === unseenColor ? "" : colors[c];
+        const rgb = targetRGB(c), i = k * 3;
+        for (let j = 0; j < 3; j++) { fromRGB[i + j] = fade ? curRGB[i + j] : rgb[j]; toRGB[i + j] = rgb[j]; }
+        colorT0[k] = now;
+        (fade ? active : dirty).add(k);
       }
-      if (pulse && changedAt[o + k]) { t.classList.remove(rem); t.classList.add(add); }
-      else if (t.classList.contains(rem) || t.classList.contains(add)) { t.classList.remove(rem, add); }
+      if (pulse && changedAt[o + k]) { pulseT0[k] = now; active.add(k); }
     }
-    if (!animate) { void grid.offsetHeight; grid.classList.remove("no-anim"); }
   }
+
+  // A tile owns its square plus the gap around it (where its highlight ring lives);
+  // clear repaints that whole cell.
+  function drawTile(k, now, clear) {
+    const s = ts, x = posX[k], y = posY[k], c = shownColor[k];
+    if (clear) { ctx.fillStyle = theme.bg; ctx.fillRect(x - gp, y - gp, s + 2 * gp, s + 2 * gp); }
+    if (c < 0 && layout !== "fixed") return;
+    if (c < 0) { // not in the deck yet: dashed outline
+      ctx.globalAlpha = 0.35;
+      ctx.strokeStyle = ctx.fillStyle = theme.muted;
+      const lw = Math.max(1, Math.round(dpr));
+      ctx.lineWidth = lw;
+      ctx.setLineDash([2 * lw, 2 * lw]);
+      ctx.strokeRect(x + lw / 2, y + lw / 2, s - lw, s - lw);
+      ctx.setLineDash([]);
+      ctx.fillText(kanji[k], x + glyphDx, y + glyphDy);
+      ctx.globalAlpha = 1;
+      return;
+    }
+    let t = (now - colorT0[k]) / colorDur;
+    t = t >= 1 ? 1 : t <= 0 ? 0 : t;
+    const i = k * 3;
+    for (let j = 0; j < 3; j++) curRGB[i + j] = fromRGB[i + j] + (toRGB[i + j] - fromRGB[i + j]) * t;
+    ctx.fillStyle = `rgb(${curRGB[i] | 0},${curRGB[i + 1] | 0},${curRGB[i + 2] | 0})`;
+    ctx.beginPath();
+    if (ctx.roundRect) ctx.roundRect(x, y, s, s, radius); else ctx.rect(x, y, s, s);
+    ctx.fill();
+    ctx.fillStyle = c === unseenColor ? theme.unseenText : theme.tileText;
+    ctx.fillText(kanji[k], x + glyphDx, y + glyphDy);
+  }
+
+  // highlight ring in the gap outside the tile; shrinks and fades like the old glow.
+  // Drawn after all tiles of a frame, since clearing a neighbor wipes the shared gap.
+  function drawRing(k, now) {
+    const p = (now - pulseT0[k]) / PULSE_MS;
+    if (p < 0 || p >= 1 || (shownColor[k] < 0 && layout !== "fixed")) return;
+    const fade = (1 - p) * (1 - p), w = gp * fade, s = ts, x = posX[k], y = posY[k];
+    // Filled band between the tile and a slightly larger rounded square (fills
+    // anti-alias more predictably than thin strokes). Clipped to the tile's cell so
+    // GPU anti-aliasing can't leave marks on a neighbor, which isn't redrawn.
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(x - gp, y - gp, s + 2 * gp, s + 2 * gp);
+    ctx.clip();
+    ctx.globalAlpha = fade;
+    ctx.fillStyle = theme.pulse;
+    ctx.beginPath();
+    if (ctx.roundRect) {
+      ctx.roundRect(x - w, y - w, s + 2 * w, s + 2 * w, radius + w);
+      ctx.roundRect(x, y, s, s, radius);
+    } else {
+      ctx.rect(x - w, y - w, s + 2 * w, s + 2 * w);
+      ctx.rect(x, y, s, s);
+    }
+    ctx.fill("evenodd");
+    ctx.restore();
+  }
+
+  function tick(now) {
+    rafId = 0;
+    if (playing) advance(now);
+    if (moving) {
+      const t = Math.min(1, (now - moveT0) / MOVE_MS);
+      const e = t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2;
+      for (let k = 0; k < N; k++) { posX[k] = fromX[k] + (toX[k] - fromX[k]) * e; posY[k] = fromY[k] + (toY[k] - fromY[k]) * e; }
+      if (t >= 1) moving = false;
+      fullRedraw = true;
+    }
+    if (fullRedraw) {
+      ctx.fillStyle = theme.bg;
+      ctx.fillRect(-gp, -gp, canvas.width, canvas.height);
+      for (let k = 0; k < N; k++) drawTile(k, now, false);
+      fullRedraw = false;
+    } else {
+      for (const k of dirty) if (!active.has(k)) drawTile(k, now, true);
+      for (const k of active) drawTile(k, now, true);
+    }
+    for (const k of active) drawRing(k, now);
+    dirty.clear();
+    for (const k of active) if (now >= colorT0[k] + colorDur && now >= pulseT0[k] + PULSE_MS) active.delete(k);
+    if (playing || moving || active.size) requestDraw();
+  }
+  function requestDraw() { if (!rafId) rafId = requestAnimationFrame(tick); }
 
   // ---------- display ----------
   function show(d, animate = true) {
     day = Math.max(0, Math.min(D - 1, d));
     const info = data.days[day];
-    // transitions roughly as long as one day is on screen, so playback looks continuous
-    const dur = playing ? Math.min(800, Math.max(60, 900 / daysPerSec)) : 220;
-    $("grid").style.setProperty("--dur", dur + "ms");
-    $("grid").classList.toggle("playing", playing);
+    // colors fade roughly as long as one day is on screen, so playback looks continuous
+    colorDur = playing ? Math.min(800, Math.max(60, 900 / daysPerSec)) : 220;
     paintTiles(animate);
-    if (layout === "sorted") placeTiles(animate);
+    // during playback tiles jump to their new place instead of sliding
+    if (layout === "sorted") placeTiles(animate && !playing);
+    requestDraw();
 
     const dt = new Date(info.date + "T00:00:00");
     $("dateLabel").textContent = `${WEEKDAYS[dt.getDay()]} ${dt.getDate()} ${MONTHS[dt.getMonth()]} ${dt.getFullYear()}`;
@@ -445,7 +577,7 @@ kbd { background: var(--surface-2); border: 1px solid var(--border); border-bott
     $("sDay").innerHTML = `${day + 1} <small>/ ${D}</small>`;
     $("slider").value = day;
     $("cursor").setAttribute("x1", day); $("cursor").setAttribute("x2", day);
-    if (hoverK >= 0) renderTip(hoverK);
+    if (pointer) updateHover();
   }
 
   // ---------- chart ----------
@@ -543,22 +675,28 @@ kbd { background: var(--surface-2); border: 1px solid var(--border); border-bott
     if (y + r.height > innerHeight - 8) y = e.clientY - r.height - pad;
     tip.style.left = Math.max(8, x) + "px"; tip.style.top = Math.max(8, y) + "px";
   }
-  $("grid").addEventListener("pointerover", (e) => {
-    const t = e.target.closest(".tile");
-    if (!t) return;
-    hoverK = +t.dataset.k;
+  function hitTest() {
+    const r = canvas.getBoundingClientRect(), scale = canvas.width / r.width;
+    const x = (pointer.clientX - r.left) * scale - gp, y = (pointer.clientY - r.top) * scale - gp;
+    if (x < 0 || y < 0 || x % pitch >= ts || y % pitch >= ts) return -1;
+    const col = Math.floor(x / pitch), i = Math.floor(y / pitch) * cols + col;
+    return col < cols && i < slotK.length ? slotK[i] : -1;
+  }
+  function updateHover() {
+    hoverK = pointer && D ? hitTest() : -1;
+    const box = $("hoverBox"), tip = $("tip");
+    if (hoverK < 0) { box.style.display = tip.style.display = "none"; return; }
+    box.style.cssText = `display:block;width:${ts / dpr}px;height:${ts / dpr}px;transform:translate(${(toX[hoverK] + gp) / dpr}px,${(toY[hoverK] + gp) / dpr}px)`;
     renderTip(hoverK);
-    $("tip").style.display = "block";
-    moveTip(e);
-  });
-  $("grid").addEventListener("pointermove", (e) => { if (hoverK >= 0) moveTip(e); });
-  $("grid").addEventListener("pointerout", (e) => {
-    if (!e.relatedTarget || !e.relatedTarget.closest || !e.relatedTarget.closest(".tile")) { hoverK = -1; $("tip").style.display = "none"; }
-  });
+    tip.style.display = "block";
+    moveTip(pointer);
+  }
+  canvas.addEventListener("pointermove", (e) => { pointer = { clientX: e.clientX, clientY: e.clientY }; updateHover(); });
+  canvas.addEventListener("pointerleave", () => { pointer = null; updateHover(); });
+  addEventListener("scroll", () => { if (pointer) updateHover(); }, { passive: true });
 
   // ---------- playback ----------
-  function frame(now) {
-    if (!playing) return;
+  function advance(now) {
     acc += (now - lastTick) / 1000;
     lastTick = now;
     const step = 1 / daysPerSec;
@@ -574,18 +712,16 @@ kbd { background: var(--surface-2); border: 1px solid var(--border); border-bott
       }
       show(next);
     }
-    requestAnimationFrame(frame);
   }
   function play() {
     if (!D) return;
     if (day >= D - 1) show(0, false);
     playing = true; acc = 0; lastTick = performance.now();
     $("bPlay").innerHTML = PAUSE_ICON;
-    requestAnimationFrame(frame);
+    requestDraw();
   }
   function stop() {
     playing = false;
-    $("grid").classList.remove("playing");
     $("bPlay").innerHTML = PLAY_ICON;
   }
   const toggle = () => (playing ? stop() : play());
@@ -609,9 +745,8 @@ kbd { background: var(--surface-2); border: 1px solid var(--border); border-bott
   function setLayout(l) {
     layout = l;
     for (const b of $("layoutSeg").children) b.setAttribute("aria-pressed", b.dataset.layout === l);
-    $("grid").classList.toggle("fixed", l === "fixed");
     store.set("layout", l);
-    if (D) placeTiles(true);
+    if (D) { fullRedraw = true; placeTiles(!playing); requestDraw(); }
   }
   $("layoutSeg").addEventListener("click", (e) => { const b = e.target.closest("button"); if (b) setLayout(b.dataset.layout); });
 
@@ -624,7 +759,9 @@ kbd { background: var(--surface-2); border: 1px solid var(--border); border-bott
     const dark = root.dataset.theme ? root.dataset.theme === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
     root.dataset.theme = dark ? "light" : "dark";
     store.set("theme", root.dataset.theme);
+    readTheme();
   });
+  matchMedia("(prefers-color-scheme: dark)").addEventListener("change", readTheme);
 
   document.addEventListener("keydown", (e) => {
     if (!D || e.target.matches("input[type=number], input[type=text]")) return;
@@ -664,8 +801,8 @@ kbd { background: var(--surface-2); border: 1px solid var(--border); border-bott
   }
 
   // ---------- start ----------
-  const theme = store.get("theme");
-  if (theme) document.documentElement.dataset.theme = theme;
+  const savedTheme = store.get("theme");
+  if (savedTheme) document.documentElement.dataset.theme = savedTheme;
   setSpeed(store.get("speed") ?? $("speed").value);
   if (store.get("loop") === "1") $("cLoop").checked = true;
   if (store.get("pulse") === "0") $("cPulse").checked = false;
