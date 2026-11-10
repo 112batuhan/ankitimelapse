@@ -1,7 +1,3 @@
-# Raw Kanji Grid timelapse exports (100+ MB each); only the extracted
-# kanji_timelapse.json / .js get pushed.
-timelapse_*.json
-
 # Local tooling
 .claude/
 __pycache__/
